@@ -1,6 +1,6 @@
 # migrate-clerk-users
 
-Demonstration of importing Clerk users into WorkOS, including setting password hashes.
+Tool for importing Clerk users into WorkOS, including setting password hashes.
 
 #### Usage
 
