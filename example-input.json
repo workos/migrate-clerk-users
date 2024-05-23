@@ -1,0 +1,44 @@
+[
+  {
+    "id": "user_2gQPH11rXtJguHjsx7VtUo8QGh2",
+    "first_name": "Paul",
+    "last_name": "Atreides",
+    "username": null,
+    "email_addresses": "paul@atreides.com",
+    "phone_numbers": null,
+    "totp_secret": null,
+    "password_digest": null,
+    "password_hasher": null,
+    "unsafe_metadata": {},
+    "public_metadata": {},
+    "private_metadata": {}
+  },
+  {
+    "id": "user_2gRua7G8WRYBglzXE5sxRbIRkfJ",
+    "first_name": "Jessica",
+    "last_name": "Atreides",
+    "username": null,
+    "email_addresses": "jessica@atreides.com|jessica@harkonnen.com",
+    "phone_numbers": null,
+    "totp_secret": null,
+    "password_digest": null,
+    "password_hasher": null,
+    "unsafe_metadata": {},
+    "public_metadata": {},
+    "private_metadata": {}
+  },
+  {
+    "id": "user_2gXEmg00DCV77CHNO4aa3q8ZYRf",
+    "first_name": null,
+    "last_name": null,
+    "username": null,
+    "email_addresses": "vlad@harkonnen.com",
+    "phone_numbers": null,
+    "totp_secret": null,
+    "password_digest": "$2b$10$.rU67Fk.7/QRC6iLPFV8Eeb9w56VKAVOd9Lt5VqgERTn8KChBFLg6",
+    "password_hasher": "bcrypt",
+    "unsafe_metadata": {},
+    "public_metadata": {},
+    "private_metadata": {}
+  }
+]
