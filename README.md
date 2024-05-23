@@ -2,17 +2,17 @@
 
 Tool for importing Clerk users into WorkOS, including setting password hashes.
 
-#### Usage
+## Usage
 
 ```bash
-WORKOS_SECRET_KEY=sk_abc123 npx github:workos/migrate-clerk-users --help
+WORKOS_SECRET_KEY=sk_test_123 npx github:workos/migrate-clerk-users --help
 ```
 
 Example output
 
 ```
-% WORKOS_SECRET_KEY=sk_abc123 npx github:workos/migrate-clerk-users \
-  --user-export dev-123abc.json
+% WORKOS_SECRET_KEY=sk_test_123 npx github:workos/migrate-clerk-users \
+  --user-export example-input.json
 Need to install the following packages:
   github:workos/migrate-clerk-users
 Ok to proceed? (y) y
@@ -24,10 +24,14 @@ Multiple email addresses found for user_2gRua7G8WRYBglzXE5sxRbIRkfJ and multi em
 Done importing. 4 of 6 user records imported.
 ```
 
-#### Input file format
+## Input file format
 
-This tool consumes the export file [obtained from Clerk support by filing a ticket](https://clerk.com/docs/deployments/exporting-users#migrating-your-users-to-a-new-system), which can include hashed passwords. Note that the script will exit with an error if any custom password hashes are present.
+This tool consumes the export file [obtained from Clerk support by filing a ticket](https://clerk.com/docs/deployments/exporting-users#migrating-your-users-to-a-new-system), which can include hashed passwords.
 
-#### Users with multiple passwords
+Note that the script will exit with an error if any custom password hashes are present.
 
-Clerk's export file returns all email addresses associated with that user under the `email_addresses` field. Unfortunately there's no way to know which email address is the default in this case without querying the Clerk API. If you pass in the `--process-multi-email true` flag to this tool, the first email address in the list will be used as the primary email address when creating the WorkOS user.
+## Users with multiple passwords
+
+Clerk's export file returns all email addresses associated with the user under the `email_addresses` field. Unfortunately in the case of multiple email addresses there's no way to know which is the default without querying the Clerk API.
+
+By passing in the `--process-multi-email true` flag to this tool, the first email address in the list will be used as the primary email address when creating the WorkOS user.
