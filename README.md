@@ -2,6 +2,8 @@
 
 Tool for importing Clerk users into WorkOS, including setting password hashes.
 
+For more information on migrating from Clerk to WorkOS, refer to [the docs](https://workos.com/docs/migrate/clerk).
+
 ## Usage
 
 ```bash
