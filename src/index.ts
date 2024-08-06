@@ -1,40 +1,41 @@
-import { WorkOS } from '@workos-inc/node';
-import dotenv from 'dotenv';
-import yargs from 'yargs';
-import { hideBin } from 'yargs/helpers';
-import Queue from 'p-queue';
+import { WorkOS, RateLimitExceededException } from "@workos-inc/node";
+import dotenv from "dotenv";
+import yargs from "yargs";
+import { hideBin } from "yargs/helpers";
+import Queue from "p-queue";
 
-import { ndjsonStream } from './ndjson-stream';
-import { ClerkExportedUser } from './clerk-exported-user';
+import { ndjsonStream } from "./ndjson-stream";
+import { ClerkExportedUser } from "./clerk-exported-user";
+import { sleep } from "./sleep";
 
 dotenv.config();
 
-const USE_LOCAL_API = (process.env.NODE_ENV ?? '').startsWith('dev');
+const USE_LOCAL_API = (process.env.NODE_ENV ?? "").startsWith("dev");
 
 const workos = new WorkOS(
   process.env.WORKOS_SECRET_KEY,
   USE_LOCAL_API
     ? {
         https: false,
-        apiHostname: 'localhost',
+        apiHostname: "localhost",
         port: 7000,
       }
-    : {}
+    : {},
 );
 
 async function findOrCreateUser(
   exportedUser: ClerkExportedUser,
-  processMultiEmail: boolean
+  processMultiEmail: boolean,
 ) {
   // Clerk formats multiple email addresses by separating them with a pipe character
   // We unfortunately have no way of knowing which email is the primary one, so we only use the first email
   // if explicitly told to
-  const emailAddresses = exportedUser.email_addresses.split('|');
+  const emailAddresses = exportedUser.email_addresses.split("|");
   const email = emailAddresses[0];
 
   if (emailAddresses.length > 1 && !processMultiEmail) {
     console.log(
-      `Multiple email addresses found for ${exportedUser.id} and multi email processing is disabled, skipping.`
+      `Multiple email addresses found for ${exportedUser.id} and multi email processing is disabled, skipping.`,
     );
     return false;
   }
@@ -43,17 +44,21 @@ async function findOrCreateUser(
     const passwordOptions = exportedUser.password_digest
       ? {
           passwordHash: exportedUser.password_digest,
-          passwordHashType: 'bcrypt' as const,
+          passwordHashType: "bcrypt" as const,
         }
       : {};
 
     return await workos.userManagement.createUser({
       email,
-      firstName: exportedUser.first_name,
-      lastName: exportedUser.last_name,
+      firstName: exportedUser.first_name ?? undefined,
+      lastName: exportedUser.last_name ?? undefined,
       ...passwordOptions,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof RateLimitExceededException) {
+      throw error;
+    }
+
     const matchingUsers = await workos.userManagement.listUsers({
       email: email.toLowerCase(),
     });
@@ -66,44 +71,43 @@ async function findOrCreateUser(
 async function processLine(
   line: unknown,
   recordNumber: number,
-  processMultiEmail: boolean
+  processMultiEmail: boolean,
 ): Promise<boolean> {
   const exportedUser = ClerkExportedUser.parse(line);
 
   const workOsUser = await findOrCreateUser(exportedUser, processMultiEmail);
   if (!workOsUser) {
     console.error(
-      `(${recordNumber}) Could not find or create user ${exportedUser.id}`
+      `(${recordNumber}) Could not find or create user ${exportedUser.id}`,
     );
     return false;
   }
 
   console.log(
-    `(${recordNumber}) Imported Clerk user ${exportedUser.id} as WorkOS user ${workOsUser.id}`
+    `(${recordNumber}) Imported Clerk user ${exportedUser.id} as WorkOS user ${workOsUser.id}`,
   );
 
   return true;
 }
 
+const DEFAULT_RETRY_AFTER = 10;
 const MAX_CONCURRENT_USER_IMPORTS = 10;
 
 async function main() {
-  const {
-    userExport: userFilePath,
-    cleanupTempDb,
-    processMultiEmail,
-  } = await yargs(hideBin(process.argv))
-    .option('user-export', {
-      type: 'string',
+  const { userExport: userFilePath, processMultiEmail } = await yargs(
+    hideBin(process.argv),
+  )
+    .option("user-export", {
+      type: "string",
       required: true,
       description:
-        'Path to the user and password export received from Clerk support.',
+        "Path to the user and password export received from Clerk support.",
     })
-    .option('process-multi-email', {
-      type: 'boolean',
+    .option("process-multi-email", {
+      type: "boolean",
       default: false,
       description:
-        'In the case of a user with multiple email addresses, whether to use the first email provided or to skip processing the user.',
+        "In the case of a user with multiple email addresses, whether to use the first email provided or to skip processing the user.",
     })
     .version(false)
     .parse();
@@ -117,23 +121,43 @@ async function main() {
     for await (const line of ndjsonStream(userFilePath)) {
       await queue.onSizeLessThan(MAX_CONCURRENT_USER_IMPORTS);
 
-      queue.add(async () => {
-        const successful = await processLine(
-          line,
-          recordCount,
-          processMultiEmail
-        );
-        if (successful) {
-          completedCount++;
-        }
-      });
-      recordCount++;
+      const recordNumber = recordCount;
+      const enqueueTask = () =>
+        queue
+          .add(async () => {
+            const successful = await processLine(
+              line,
+              recordNumber,
+              processMultiEmail,
+            );
+            if (successful) {
+              completedCount++;
+            }
+          })
+          .catch(async (error: unknown) => {
+            if (!(error instanceof RateLimitExceededException)) {
+              throw error;
+            }
+
+            const retryAfter = (error.retryAfter ?? DEFAULT_RETRY_AFTER) + 1;
+            console.warn(
+              `Rate limit exceeded. Pausing queue for ${retryAfter} seconds.`,
+            );
+
+            queue.pause();
+            enqueueTask();
+
+            await sleep(retryAfter * 1000);
+
+            queue.start();
+          });
+      enqueueTask();
     }
 
     await queue.onIdle();
 
     console.log(
-      `Done importing. ${completedCount} of ${recordCount} user records imported.`
+      `Done importing. ${completedCount} of ${recordCount} user records imported.`,
     );
   } finally {
   }

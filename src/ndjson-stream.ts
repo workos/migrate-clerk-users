@@ -1,9 +1,9 @@
-import fs from 'fs';
-import { JSONParser } from '@streamparser/json';
-import { PassThrough } from 'stream';
+import fs from "fs";
+import { JSONParser } from "@streamparser/json";
+import { PassThrough } from "stream";
 
 export async function* ndjsonStream(filePath: string): AsyncIterable<unknown> {
-  const fileStream = fs.createReadStream(filePath, { encoding: 'utf8' });
+  const fileStream = fs.createReadStream(filePath, { encoding: "utf8" });
   const jsonParser = new JSONParser();
 
   // Create a PassThrough stream to pipe data through the parser
@@ -15,8 +15,8 @@ export async function* ndjsonStream(filePath: string): AsyncIterable<unknown> {
   let deferredResolve: ((value?: unknown) => void) | null = null;
   const streamComplete = new Promise((resolve, reject) => {
     deferredResolve = resolve;
-    fileStream.on('error', reject);
-    passThrough.on('error', reject);
+    fileStream.on("error", reject);
+    passThrough.on("error", reject);
   });
 
   // Handle parsed data
@@ -34,7 +34,7 @@ export async function* ndjsonStream(filePath: string): AsyncIterable<unknown> {
   fileStream.pipe(passThrough);
 
   // Pipe the PassThrough stream to the JSON parser
-  passThrough.on('data', (chunk) => {
+  passThrough.on("data", (chunk) => {
     jsonParser.write(chunk);
   });
 
