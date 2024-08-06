@@ -49,8 +49,8 @@ async function findOrCreateUser(
 
     return await workos.userManagement.createUser({
       email,
-      firstName: exportedUser.first_name,
-      lastName: exportedUser.last_name,
+      firstName: exportedUser.first_name ?? undefined,
+      lastName: exportedUser.last_name ?? undefined,
       ...passwordOptions,
     });
   } catch {
