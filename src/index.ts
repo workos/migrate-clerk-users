@@ -88,11 +88,9 @@ async function processLine(
 const MAX_CONCURRENT_USER_IMPORTS = 10;
 
 async function main() {
-  const {
-    userExport: userFilePath,
-    cleanupTempDb,
-    processMultiEmail,
-  } = await yargs(hideBin(process.argv))
+  const { userExport: userFilePath, processMultiEmail } = await yargs(
+    hideBin(process.argv),
+  )
     .option("user-export", {
       type: "string",
       required: true,
