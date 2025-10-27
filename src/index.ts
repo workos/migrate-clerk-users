@@ -4,7 +4,7 @@ import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 import Queue from "p-queue";
 
-import { ndjsonStream } from "./ndjson-stream";
+import { userExportStream } from "./user-export-stream";
 import { ClerkExportedUser } from "./clerk-exported-user";
 import { sleep } from "./sleep";
 
@@ -20,12 +20,24 @@ const workos = new WorkOS(
         apiHostname: "localhost",
         port: 7000,
       }
-    : {},
+    : {}
 );
+
+type EmailVerifiedMode = "never" | "always" | "from-csv";
+
+function shouldMarkEmailVerified(
+  exportedUser: ClerkExportedUser,
+  mode: EmailVerifiedMode
+): boolean {
+  if (mode === "always") return true;
+  if (mode === "from-csv") return exportedUser.primary_email_verified === true;
+  return false;
+}
 
 async function findOrCreateUser(
   exportedUser: ClerkExportedUser,
   processMultiEmail: boolean,
+  emailVerifiedMode: EmailVerifiedMode
 ) {
   // Clerk formats multiple email addresses by separating them with a pipe character
   // We unfortunately have no way of knowing which email is the primary one, so we only use the first email
@@ -35,7 +47,7 @@ async function findOrCreateUser(
 
   if (emailAddresses.length > 1 && !processMultiEmail) {
     console.log(
-      `Multiple email addresses found for ${exportedUser.id} and multi email processing is disabled, skipping.`,
+      `Multiple email addresses found for ${exportedUser.id} and multi email processing is disabled, skipping.`
     );
     return false;
   }
@@ -48,12 +60,28 @@ async function findOrCreateUser(
         }
       : {};
 
-    return await workos.userManagement.createUser({
+    const created = await workos.userManagement.createUser({
       email,
       firstName: exportedUser.first_name ?? undefined,
       lastName: exportedUser.last_name ?? undefined,
       ...passwordOptions,
     });
+    if (shouldMarkEmailVerified(exportedUser, emailVerifiedMode)) {
+      try {
+        await (workos.userManagement as any).updateUser({
+          userId: created.id,
+          emailVerified: true,
+        });
+      } catch (verifyErr) {
+        if (verifyErr instanceof RateLimitExceededException) throw verifyErr;
+        console.warn(
+          `Failed to mark email verified for created user ${
+            created.id
+          }: ${String(verifyErr)}`
+        );
+      }
+    }
+    return created;
   } catch (error) {
     if (error instanceof RateLimitExceededException) {
       throw error;
@@ -63,7 +91,42 @@ async function findOrCreateUser(
       email: email.toLowerCase(),
     });
     if (matchingUsers.data.length === 1) {
-      return matchingUsers.data[0];
+      const existingUser = matchingUsers.data[0];
+      if (exportedUser.password_digest) {
+        try {
+          // Update password for existing user if provided in export
+          await (workos.userManagement as any).updateUser({
+            userId: existingUser.id,
+            passwordHash: exportedUser.password_digest,
+            passwordHashType: "bcrypt",
+          });
+        } catch (updateError) {
+          if (updateError instanceof RateLimitExceededException) {
+            throw updateError;
+          }
+          console.warn(
+            `Failed to update password for existing user ${
+              existingUser.id
+            }: ${String(updateError)}`
+          );
+        }
+      }
+      if (shouldMarkEmailVerified(exportedUser, emailVerifiedMode)) {
+        try {
+          await (workos.userManagement as any).updateUser({
+            userId: existingUser.id,
+            emailVerified: true,
+          });
+        } catch (verifyErr) {
+          if (verifyErr instanceof RateLimitExceededException) throw verifyErr;
+          console.warn(
+            `Failed to mark email verified for existing user ${
+              existingUser.id
+            }: ${String(verifyErr)}`
+          );
+        }
+      }
+      return existingUser;
     }
   }
 }
@@ -72,19 +135,24 @@ async function processLine(
   line: unknown,
   recordNumber: number,
   processMultiEmail: boolean,
+  emailVerifiedMode: EmailVerifiedMode
 ): Promise<boolean> {
   const exportedUser = ClerkExportedUser.parse(line);
 
-  const workOsUser = await findOrCreateUser(exportedUser, processMultiEmail);
+  const workOsUser = await findOrCreateUser(
+    exportedUser,
+    processMultiEmail,
+    emailVerifiedMode
+  );
   if (!workOsUser) {
     console.error(
-      `(${recordNumber}) Could not find or create user ${exportedUser.id}`,
+      `(${recordNumber}) Could not find or create user ${exportedUser.id}`
     );
     return false;
   }
 
   console.log(
-    `(${recordNumber}) Imported Clerk user ${exportedUser.id} as WorkOS user ${workOsUser.id}`,
+    `(${recordNumber}) Imported Clerk user ${exportedUser.id} as WorkOS user ${workOsUser.id}`
   );
 
   return true;
@@ -94,9 +162,11 @@ const DEFAULT_RETRY_AFTER = 10;
 const MAX_CONCURRENT_USER_IMPORTS = 10;
 
 async function main() {
-  const { userExport: userFilePath, processMultiEmail } = await yargs(
-    hideBin(process.argv),
-  )
+  const {
+    userExport: userFilePath,
+    processMultiEmail,
+    emailVerified: emailVerifiedMode,
+  } = await yargs(hideBin(process.argv))
     .option("user-export", {
       type: "string",
       required: true,
@@ -109,6 +179,13 @@ async function main() {
       description:
         "In the case of a user with multiple email addresses, whether to use the first email provided or to skip processing the user.",
     })
+    .option("email-verified", {
+      type: "string",
+      default: "never",
+      choices: ["never", "always", "from-csv"],
+      description:
+        "Whether to mark the primary email as verified: never (default), always, or from-csv (only if primary appears in verified_email_addresses).",
+    })
     .version(false)
     .parse();
 
@@ -118,7 +195,7 @@ async function main() {
   let completedCount = 0;
 
   try {
-    for await (const line of ndjsonStream(userFilePath)) {
+    for await (const line of userExportStream(userFilePath)) {
       await queue.onSizeLessThan(MAX_CONCURRENT_USER_IMPORTS);
 
       const recordNumber = recordCount;
@@ -129,6 +206,7 @@ async function main() {
               line,
               recordNumber,
               processMultiEmail,
+              emailVerifiedMode as EmailVerifiedMode
             );
             if (successful) {
               completedCount++;
@@ -141,7 +219,7 @@ async function main() {
 
             const retryAfter = (error.retryAfter ?? DEFAULT_RETRY_AFTER) + 1;
             console.warn(
-              `Rate limit exceeded. Pausing queue for ${retryAfter} seconds.`,
+              `Rate limit exceeded. Pausing queue for ${retryAfter} seconds.`
             );
 
             queue.pause();
@@ -157,7 +235,7 @@ async function main() {
     await queue.onIdle();
 
     console.log(
-      `Done importing. ${completedCount} of ${recordCount} user records imported.`,
+      `Done importing. ${completedCount} of ${recordCount} user records imported.`
     );
   } finally {
   }

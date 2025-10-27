@@ -10,6 +10,8 @@ export const ClerkExportedUser = z.object({
   totp_secret: z.string().nullish(),
   password_digest: z.string().nullish(),
   password_hasher: z.string().nullish(),
+  // When CSV mode is used, indicates whether the primary email should be treated as verified
+  primary_email_verified: z.boolean().optional(),
   unsafe_metadata: z.optional(z.record(z.string(), z.unknown())),
   public_metadata: z.optional(z.record(z.string(), z.unknown())),
   private_metadata: z.optional(z.record(z.string(), z.unknown())),
