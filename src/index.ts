@@ -7,6 +7,9 @@ import Queue from "p-queue";
 import { userExportStream } from "./user-export-stream";
 import { ClerkExportedUser } from "./clerk-exported-user";
 import { sleep } from "./sleep";
+import { createLogger } from "./ui/logger";
+import fs from "fs";
+import path from "path";
 
 dotenv.config();
 
@@ -166,6 +169,8 @@ async function main() {
     userExport: userFilePath,
     processMultiEmail,
     emailVerified: emailVerifiedMode,
+    quiet,
+    errorsOut: errorsOutPath,
   } = await yargs(hideBin(process.argv))
     .option("user-export", {
       type: "string",
@@ -186,6 +191,16 @@ async function main() {
       description:
         "Whether to mark the primary email as verified: never (default), always, or from-csv (only if primary appears in verified_email_addresses).",
     })
+    .option("quiet", {
+      type: "boolean",
+      default: false,
+      description: "Suppress non-error output.",
+    })
+    .option("errors-out", {
+      type: "string",
+      description:
+        "Optional path to write a detailed error report (CSV if *.csv, otherwise JSON).",
+    })
     .version(false)
     .parse();
 
@@ -193,6 +208,24 @@ async function main() {
 
   let recordCount = 0;
   let completedCount = 0;
+  let warningCount = 0;
+  let errorCount = 0;
+  const failures: Array<{
+    recordNumber: number;
+    clerkUserId?: string;
+    email?: string;
+    errorMessage: string;
+    timestamp: string;
+  }> = [];
+
+  const logger = createLogger({
+    quiet,
+    useColor: !process.env.NO_COLOR,
+    isTTY: process.stdout.isTTY ?? false,
+  });
+
+  const startTime = Date.now();
+  logger.logHeader(`Importing users from ${userFilePath}`);
 
   try {
     for await (const line of userExportStream(userFilePath)) {
@@ -203,6 +236,23 @@ async function main() {
       const enqueueTask = () =>
         queue
           .add(async () => {
+            logger.logStepStart(`Processing record #${recordNumber}`);
+            let preview: ClerkExportedUser | null = null;
+            try {
+              preview = ClerkExportedUser.parse(line);
+            } catch (zerr) {
+              errorCount++;
+              logger.logStepFail(`Failed record #${recordNumber}`);
+              failures.push({
+                recordNumber,
+                clerkUserId: undefined,
+                email: undefined,
+                errorMessage: String(zerr),
+                timestamp: new Date().toISOString(),
+              });
+              return;
+            }
+
             const successful = await processLine(
               line,
               recordNumber,
@@ -211,15 +261,44 @@ async function main() {
             );
             if (successful) {
               completedCount++;
+              logger.logStepSuccess(`Imported record #${recordNumber}`);
+            } else {
+              errorCount++;
+              logger.logStepFail(`Failed record #${recordNumber}`);
+              failures.push({
+                recordNumber,
+                clerkUserId: preview?.id,
+                email: preview
+                  ? preview.email_addresses.split("|")[0]
+                  : undefined,
+                errorMessage: "Could not find or create user",
+                timestamp: new Date().toISOString(),
+              });
             }
           })
           .catch(async (error: unknown) => {
             if (!(error instanceof RateLimitExceededException)) {
+              errorCount++;
+              logger.logError(String(error));
+              // Best-effort preview to capture ID for the failure record
+              let previewId: string | undefined;
+              try {
+                const p = ClerkExportedUser.parse(line);
+                previewId = p.id;
+              } catch (_) {}
+              failures.push({
+                recordNumber,
+                clerkUserId: previewId,
+                email: undefined,
+                errorMessage: String(error),
+                timestamp: new Date().toISOString(),
+              });
               throw error;
             }
 
             const retryAfter = (error.retryAfter ?? DEFAULT_RETRY_AFTER) + 1;
-            console.warn(
+            warningCount++;
+            logger.logWarn(
               `Rate limit exceeded. Pausing queue for ${retryAfter} seconds.`
             );
 
@@ -235,9 +314,67 @@ async function main() {
 
     await queue.onIdle();
 
-    console.log(
-      `Done importing. ${completedCount} of ${recordCount} user records imported.`
-    );
+    const status =
+      errorCount === 0 ? "Success" : completedCount > 0 ? "Partial" : "Failed";
+    const durationMs = Date.now() - startTime;
+    logger.printSummaryBox({
+      status: status as "Success" | "Partial" | "Failed",
+      durationMs,
+      warnings: warningCount,
+      errors: errorCount,
+      imported: completedCount,
+      total: recordCount,
+    });
+
+    if (errorCount > 0) {
+      const failedIds = failures
+        .map((f) => f.clerkUserId)
+        .filter((v): v is string => Boolean(v));
+      const sample = failedIds.slice(0, 5);
+      if (sample.length > 0) {
+        logger.logWarn(
+          `Failed Clerk user ids (first ${sample.length}): ${sample.join(", ")}`
+        );
+      }
+      if (errorsOutPath) {
+        const ext = path.extname(errorsOutPath).toLowerCase();
+        try {
+          if (ext === ".csv") {
+            const header = [
+              "recordNumber",
+              "clerkUserId",
+              "email",
+              "errorMessage",
+              "timestamp",
+            ].join(",");
+
+            function escapeCsvField(field: unknown): string {
+              const str = String(field ?? "");
+              const escaped = str.replace(/"/g, '""');
+              return `"${escaped}"`;
+            }
+
+            const rows = failures.map((f) =>
+              [
+                escapeCsvField(f.recordNumber),
+                escapeCsvField(f.clerkUserId ?? ""),
+                escapeCsvField(f.email ?? ""),
+                escapeCsvField(f.errorMessage ?? ""),
+                escapeCsvField(f.timestamp),
+              ].join(",")
+            );
+            fs.writeFileSync(errorsOutPath, [header, ...rows].join("\n"), {
+              encoding: "utf8",
+            });
+          } else {
+            fs.writeFileSync(errorsOutPath, JSON.stringify(failures, null, 2));
+          }
+          logger.logInfo(`Wrote error report to ${errorsOutPath}`);
+        } catch (writeErr) {
+          logger.logError(`Failed to write error report: ${String(writeErr)}`);
+        }
+      }
+    }
   } finally {
   }
 }
