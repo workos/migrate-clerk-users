@@ -23,6 +23,8 @@
     "@streamparser/json": "^0.0.21",
     "@workos-inc/node": "^7.4.0",
     "better-sqlite3": "^9.0.0",
+    "csv-parse": "^5.5.6",
+    "bcryptjs": "^2.4.3",
     "dotenv": "^16.3.1",
     "kysely": "^0.26.3",
     "p-queue": "^7.4.1",

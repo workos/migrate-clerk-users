@@ -28,7 +28,22 @@ Done importing. 4 of 6 user records imported.
 
 ## Input file format
 
-This tool consumes the export file [obtained from Clerk support by filing a ticket](https://clerk.com/docs/deployments/exporting-users#migrating-your-users-to-a-new-system), which can include hashed passwords.
+This tool consumes either of the following:
+
+- A JSON export file [obtained from Clerk support by filing a ticket](https://clerk.com/docs/deployments/exporting-users#migrating-your-users-to-a-new-system), which can include hashed passwords. The JSON should be an array of user objects matching the schema in `src/clerk-exported-user.ts`.
+- A CSV export from Clerk containing columns: `id,first_name,last_name,username,primary_email_address,primary_phone_number,verified_email_addresses,unverified_email_addresses,verified_phone_numbers,unverified_phone_numbers,totp_secret,password_digest,password_hasher`.
+
+When a `.csv` file is provided, the tool will automatically map Clerk's columns to the expected fields and combine email addresses into the `email_addresses` field (pipe-separated, with the primary email first). No manual transformation is required.
+
+### Email verification behavior
+
+You can control whether to mark the primary email as verified when creating/importing users via the `--email-verified` flag:
+
+- `never` (default): do not mark email as verified.
+- `always`: mark the primary email as verified for all users.
+- `from-csv`: mark the primary email as verified only if it appears in the CSV column `verified_email_addresses`.
+
+This applies to both newly created users and existing users matched by email. For JSON inputs, `from-csv` behaves like `never` unless you add an optional `primary_email_verified` boolean to the JSON object.
 
 Note that the script will exit with an error if any custom password hashes are present.
 
@@ -36,4 +51,4 @@ Note that the script will exit with an error if any custom password hashes are p
 
 Clerk's export file returns all email addresses associated with the user under the `email_addresses` field. Unfortunately in the case of multiple email addresses there's no way to know which is the default without querying the Clerk API.
 
-By passing in the `--process-multi-email true` flag to this tool, the first email address in the list will be used as the primary email address when creating the WorkOS user.
+By passing in the `--process-multi-email true` flag to this tool, the first email address in the list will be used as the primary email address when creating the WorkOS user. This applies to both JSON and CSV inputs; for CSV inputs, the primary email is listed first followed by any additional verified and unverified emails.
