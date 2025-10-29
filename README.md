@@ -18,12 +18,19 @@ Example output
 Need to install the following packages:
   github:workos/migrate-clerk-users
 Ok to proceed? (y) y
-Importing users from example-input.json
-(1) Imported user paul@atreides.com as WorkOS User user_01HCYZ09NQHZ4X1ZRVZ3V09WWW
-Multiple email addresses found for user_2gRua7G8WRYBglzXE5sxRbIRkfJ and multi email processing is disabled, skipping.
-(2) Could not find or create user user_2gRua7G8WRYBglzXE5sxRbIRkfJ
-(3) Imported user vlad@harkonnen.com as WorkOS User user_01HCYZ09PRH8THC7ZEDYBEJ008
-Done importing. 4 of 6 user records imported.
+▶ Importing users from example-input.csv
+▶ Processing record #1
+✔ Imported record #1
+▶ Processing record #2
+✔ Imported record #2
+┌──────────────────────────────────────┐
+│ SUMMARY                              │
+│ Status: Success                      │
+│ Users imported: 2/2                  │
+│ Duration: 842 ms                     │
+│ Warnings: 0                          │
+│ Errors: 0                            │
+└──────────────────────────────────────┘
 ```
 
 ## Input file format
@@ -34,6 +41,11 @@ This tool consumes either of the following:
 - A CSV export from Clerk containing columns: `id,first_name,last_name,username,primary_email_address,primary_phone_number,verified_email_addresses,unverified_email_addresses,verified_phone_numbers,unverified_phone_numbers,totp_secret,password_digest,password_hasher`.
 
 When a `.csv` file is provided, the tool will automatically map Clerk's columns to the expected fields and combine email addresses into the `email_addresses` field (pipe-separated, with the primary email first). No manual transformation is required.
+
+### Passwords
+
+- If `password_digest` is provided with `password_hasher` set to `bcrypt`, the user will be created with that password.
+- If a matching user already exists, the importer will update the password hash.
 
 ### Email verification behavior
 
@@ -47,8 +59,37 @@ This applies to both newly created users and existing users matched by email. Fo
 
 Note that the script will exit with an error if any custom password hashes are present.
 
+### CLI flags
+
+- `--user-export <path>`: Path to Clerk export (JSON array or CSV).
+- `--process-multi-email` (default false): If multiple emails exist, use the first; otherwise skip that user.
+- `--email-verified <never|always|from-csv>`: Controls whether to mark the primary email as verified.
+- `--quiet` (default false): Suppress non-error output.
+- `--errors-out <path>`: Write a detailed error report; CSV when `*.csv`, otherwise JSON.
+
+### Error reporting
+
+- Terminal summary shows totals and, if any failures, the first few failed Clerk user ids.
+- For a detailed per-record error report, pass `--errors-out path/to/errors.csv` (or `.json`).
+  - Report fields: `recordNumber`, `clerkUserId`, `email` (primary), `errorMessage`, `timestamp`.
+  - The terminal never prints emails or other PII by default.
+
+### Local testing utilities
+
+- Generate a bcrypt hash (defaults to hashing the string `password`):
+  ```bash
+  npx tsx bin/gen-bcrypt.ts
+  # or specify password and cost: npx tsx bin/gen-bcrypt.ts "mySecret" 12
+  ```
+  Use the printed hash in the `password_digest` column with `password_hasher=bcrypt`.
+
 ## Users with multiple passwords
 
 Clerk's export file returns all email addresses associated with the user under the `email_addresses` field. Unfortunately in the case of multiple email addresses there's no way to know which is the default without querying the Clerk API.
 
 By passing in the `--process-multi-email true` flag to this tool, the first email address in the list will be used as the primary email address when creating the WorkOS user. This applies to both JSON and CSV inputs; for CSV inputs, the primary email is listed first followed by any additional verified and unverified emails.
+
+## Notes
+
+- The CLI respects `NO_COLOR` and non-TTY environments.
+- The summary box adapts to terminal width and shows `Users imported: X/Y`.
