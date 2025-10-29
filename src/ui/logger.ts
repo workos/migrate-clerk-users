@@ -63,7 +63,6 @@ export function createLogger(opts: LoggerOptions = {}) {
   const useColor =
     opts.useColor ?? (process.env.NO_COLOR ? false : pc.isColorSupported);
   const c = colorize(useColor);
-  const isTTY = opts.isTTY ?? process.stdout.isTTY ?? false;
   const quiet = !!opts.quiet;
 
   function emit(line: string) {
@@ -101,7 +100,7 @@ export function createLogger(opts: LoggerOptions = {}) {
       line(c.red(symbols.fail), msg);
     },
     printSummaryBox(summary: Summary) {
-      const stripAnsi = (s: string) => s.replace(/\x1B\[[0-9;]*m/g, "");
+      const stripAnsi = (s: string) => s.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "");
       const visibleLen = (s: string) => stripAnsi(s).length;
 
       const statusColor =

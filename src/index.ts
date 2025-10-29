@@ -215,7 +215,6 @@ async function main() {
     clerkUserId?: string;
     email?: string;
     errorMessage: string;
-    errorCode?: string;
     timestamp: string;
   }> = [];
 
@@ -284,7 +283,7 @@ async function main() {
               // Best-effort preview to capture ID for the failure record
               let previewId: string | undefined;
               try {
-                const p = ClerkExportedUser.parse(line as unknown);
+                const p = ClerkExportedUser.parse(line);
                 previewId = p.id;
               } catch (_) {}
               failures.push({
@@ -346,19 +345,22 @@ async function main() {
               "clerkUserId",
               "email",
               "errorMessage",
-              "errorCode",
               "timestamp",
             ].join(",");
+
+            function escapeCsvField(field: unknown): string {
+              const str = String(field ?? "");
+              const escaped = str.replace(/"/g, '""');
+              return `"${escaped}"`;
+            }
+
             const rows = failures.map((f) =>
               [
-                f.recordNumber,
-                f.clerkUserId ?? "",
-                f.email ?? "",
-                (f.errorMessage ?? "")
-                  .replaceAll("\n", " ")
-                  .replaceAll(",", " "),
-                f.errorCode ?? "",
-                f.timestamp,
+                escapeCsvField(f.recordNumber),
+                escapeCsvField(f.clerkUserId ?? ""),
+                escapeCsvField(f.email ?? ""),
+                escapeCsvField(f.errorMessage ?? ""),
+                escapeCsvField(f.timestamp),
               ].join(",")
             );
             fs.writeFileSync(errorsOutPath, [header, ...rows].join("\n"), {
