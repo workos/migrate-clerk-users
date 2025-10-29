@@ -68,7 +68,7 @@ async function findOrCreateUser(
     });
     if (shouldMarkEmailVerified(exportedUser, emailVerifiedMode)) {
       try {
-        await (workos.userManagement as any).updateUser({
+        await workos.userManagement.updateUser({
           userId: created.id,
           emailVerified: true,
         });
@@ -95,7 +95,7 @@ async function findOrCreateUser(
       if (exportedUser.password_digest) {
         try {
           // Update password for existing user if provided in export
-          await (workos.userManagement as any).updateUser({
+          await workos.userManagement.updateUser({
             userId: existingUser.id,
             passwordHash: exportedUser.password_digest,
             passwordHashType: "bcrypt",
@@ -113,7 +113,7 @@ async function findOrCreateUser(
       }
       if (shouldMarkEmailVerified(exportedUser, emailVerifiedMode)) {
         try {
-          await (workos.userManagement as any).updateUser({
+          await workos.userManagement.updateUser({
             userId: existingUser.id,
             emailVerified: true,
           });
@@ -198,7 +198,8 @@ async function main() {
     for await (const line of userExportStream(userFilePath)) {
       await queue.onSizeLessThan(MAX_CONCURRENT_USER_IMPORTS);
 
-      const recordNumber = recordCount;
+      const recordNumber = recordCount + 1;
+      recordCount++;
       const enqueueTask = () =>
         queue
           .add(async () => {

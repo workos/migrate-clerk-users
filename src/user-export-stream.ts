@@ -104,12 +104,15 @@ export async function* userExportStream(
 
   const queue: unknown[] = [];
   let deferredResolve: ((value?: unknown) => void) | null = null;
+  let done = false;
 
-  const streamComplete = new Promise((resolve, reject) => {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const _ = resolve; // keep reference to avoid TS removing it
-    fileStream.on("error", reject);
-    passThrough.on("error", reject);
+  fileStream.on("error", (err) => passThrough.emit("error", err));
+  passThrough.on("error", () => {
+    // Wake any waiter to surface the error path
+    if (deferredResolve) {
+      deferredResolve();
+      deferredResolve = null;
+    }
   });
 
   jsonParser.onValue = ({ value, key }) => {
@@ -126,16 +129,24 @@ export async function* userExportStream(
   passThrough.on("data", (chunk) => {
     jsonParser.write(chunk);
   });
+  passThrough.on("end", () => {
+    done = true;
+    if (deferredResolve) {
+      deferredResolve();
+      deferredResolve = null;
+    }
+  });
 
   while (true) {
     if (queue.length > 0) {
       yield queue.shift();
-    } else if (deferredResolve === null) {
-      break;
-    } else {
-      await new Promise((resolve) => {
-        deferredResolve = resolve;
-      });
+      continue;
     }
+    if (done) {
+      break;
+    }
+    await new Promise((resolve) => {
+      deferredResolve = resolve;
+    });
   }
 }
