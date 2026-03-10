@@ -3,7 +3,7 @@
   "module": "src/index.ts",
   "type": "module",
   "bin": {
-    "migrate-clerk-users": "bin/migrate-clerk-users.ts"
+    "migrate-clerk-users": "bin/migrate-clerk-users.mjs"
   },
   "scripts": {
     "build": "tsc",
