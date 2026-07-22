@@ -115,8 +115,11 @@ export async function* userExportStream(
     }
   });
 
-  jsonParser.onValue = ({ value, key }) => {
-    if (!Number.isNaN(parseInt(key as string, 10))) {
+  jsonParser.onValue = ({ value, key, stack }) => {
+    // Only accept elements of the top-level array. `stack.length === 1` means
+    // the value's sole ancestor is the root array, so nested numeric keys (e.g.
+    // an object under a user's `unsafe_metadata`) are not mistaken for records.
+    if (stack.length === 1 && !Number.isNaN(parseInt(key as string, 10))) {
       queue.push(value);
       if (deferredResolve) {
         deferredResolve();

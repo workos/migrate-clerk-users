@@ -20,8 +20,10 @@ export async function* ndjsonStream(filePath: string): AsyncIterable<unknown> {
   });
 
   // Handle parsed data
-  jsonParser.onValue = ({ value, parent, key }) => {
-    if (!Number.isNaN(parseInt(key as string, 10))) {
+  jsonParser.onValue = ({ value, key, stack }) => {
+    // Only accept elements of the top-level array (see user-export-stream.ts):
+    // nested numeric keys must not be treated as top-level records.
+    if (stack.length === 1 && !Number.isNaN(parseInt(key as string, 10))) {
       queue.push(value);
       if (deferredResolve) {
         deferredResolve();
