@@ -43,7 +43,7 @@ function mergeEmails(
   return emails.join("|");
 }
 
-function mapCsvRowToUser(row: Record<string, unknown>): ClerkExportedUser {
+export function mapCsvRowToUser(row: Record<string, unknown>): ClerkExportedUser {
   const email_addresses = mergeEmails(
     row.primary_email_address,
     row.verified_email_addresses,

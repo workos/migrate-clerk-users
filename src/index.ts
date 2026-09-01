@@ -37,7 +37,7 @@ function shouldMarkEmailVerified(
   return false;
 }
 
-async function findOrCreateUser(
+export async function findOrCreateUser(
   exportedUser: ClerkExportedUser,
   processMultiEmail: boolean,
   emailVerifiedMode: EmailVerifiedMode
