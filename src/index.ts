@@ -23,14 +23,14 @@ const workos = new WorkOS(
         apiHostname: "localhost",
         port: 7000,
       }
-    : {}
+    : {},
 );
 
 type EmailVerifiedMode = "never" | "always" | "from-csv";
 
 function shouldMarkEmailVerified(
   exportedUser: ClerkExportedUser,
-  mode: EmailVerifiedMode
+  mode: EmailVerifiedMode,
 ): boolean {
   if (mode === "always") return true;
   if (mode === "from-csv") return exportedUser.primary_email_verified === true;
@@ -40,17 +40,25 @@ function shouldMarkEmailVerified(
 export async function findOrCreateUser(
   exportedUser: ClerkExportedUser,
   processMultiEmail: boolean,
-  emailVerifiedMode: EmailVerifiedMode
+  emailVerifiedMode: EmailVerifiedMode,
+  updateExistingPasswords = false,
 ) {
   // Clerk formats multiple email addresses by separating them with a pipe character
   // We unfortunately have no way of knowing which email is the primary one, so we only use the first email
   // if explicitly told to
-  const emailAddresses = exportedUser.email_addresses.split("|");
+  const emailAddresses = exportedUser.email_addresses
+    .split("|")
+    .filter(Boolean);
   const email = emailAddresses[0];
+
+  if (!email) {
+    console.log(`No email address found for ${exportedUser.id}, skipping.`);
+    return false;
+  }
 
   if (emailAddresses.length > 1 && !processMultiEmail) {
     console.log(
-      `Multiple email addresses found for ${exportedUser.id} and multi email processing is disabled, skipping.`
+      `Multiple email addresses found for ${exportedUser.id} and multi email processing is disabled, skipping.`,
     );
     return false;
   }
@@ -80,7 +88,7 @@ export async function findOrCreateUser(
         console.warn(
           `Failed to mark email verified for created user ${
             created.id
-          }: ${String(verifyErr)}`
+          }: ${String(verifyErr)}`,
         );
       }
     }
@@ -95,7 +103,18 @@ export async function findOrCreateUser(
     });
     if (matchingUsers.data.length === 1) {
       const existingUser = matchingUsers.data[0];
-      if (exportedUser.password_digest) {
+      if (exportedUser.password_digest && !updateExistingPasswords) {
+        console.warn(
+          `Found existing user for ${exportedUser.id}; not updating their password. Pass --update-existing-passwords to update passwords for existing users.`,
+        );
+      } else if (
+        exportedUser.password_digest &&
+        exportedUser.primary_email_verified === false
+      ) {
+        console.warn(
+          `Email for ${exportedUser.id} is not verified in the export; not updating the password for existing user ${existingUser.id}.`,
+        );
+      } else if (exportedUser.password_digest) {
         try {
           // Update password for existing user if provided in export
           await workos.userManagement.updateUser({
@@ -110,7 +129,7 @@ export async function findOrCreateUser(
           console.warn(
             `Failed to update password for existing user ${
               existingUser.id
-            }: ${String(updateError)}`
+            }: ${String(updateError)}`,
           );
         }
       }
@@ -125,7 +144,7 @@ export async function findOrCreateUser(
           console.warn(
             `Failed to mark email verified for existing user ${
               existingUser.id
-            }: ${String(verifyErr)}`
+            }: ${String(verifyErr)}`,
           );
         }
       }
@@ -138,24 +157,26 @@ async function processLine(
   line: unknown,
   recordNumber: number,
   processMultiEmail: boolean,
-  emailVerifiedMode: EmailVerifiedMode
+  emailVerifiedMode: EmailVerifiedMode,
+  updateExistingPasswords: boolean,
 ): Promise<boolean> {
   const exportedUser = ClerkExportedUser.parse(line);
 
   const workOsUser = await findOrCreateUser(
     exportedUser,
     processMultiEmail,
-    emailVerifiedMode
+    emailVerifiedMode,
+    updateExistingPasswords,
   );
   if (!workOsUser) {
     console.error(
-      `(${recordNumber}) Could not find or create user ${exportedUser.id}`
+      `(${recordNumber}) Could not find or create user ${exportedUser.id}`,
     );
     return false;
   }
 
   console.log(
-    `(${recordNumber}) Imported Clerk user ${exportedUser.id} as WorkOS user ${workOsUser.id}`
+    `(${recordNumber}) Imported Clerk user ${exportedUser.id} as WorkOS user ${workOsUser.id}`,
   );
 
   return true;
@@ -171,6 +192,8 @@ async function main() {
     emailVerified: emailVerifiedMode,
     quiet,
     errorsOut: errorsOutPath,
+    includeUnverifiedEmails,
+    updateExistingPasswords,
   } = await yargs(hideBin(process.argv))
     .option("user-export", {
       type: "string",
@@ -190,6 +213,18 @@ async function main() {
       choices: ["never", "always", "from-csv"],
       description:
         "Whether to mark the primary email as verified: never (default), always, or from-csv (only if primary appears in verified_email_addresses).",
+    })
+    .option("include-unverified-emails", {
+      type: "boolean",
+      default: false,
+      description:
+        "Include unverified email addresses from CSV exports when determining a user's email addresses. Unverified emails are not proof of ownership, so enabling this can associate a record with an account its owner never verified.",
+    })
+    .option("update-existing-passwords", {
+      type: "boolean",
+      default: false,
+      description:
+        "When a user with a matching email already exists in WorkOS, update their password hash from the export. Only enable this if every record in the export is trusted, since it replaces the existing user's credentials.",
     })
     .option("quiet", {
       type: "boolean",
@@ -228,7 +263,9 @@ async function main() {
   logger.logHeader(`Importing users from ${userFilePath}`);
 
   try {
-    for await (const line of userExportStream(userFilePath)) {
+    for await (const line of userExportStream(userFilePath, {
+      includeUnverifiedEmails,
+    })) {
       await queue.onSizeLessThan(MAX_CONCURRENT_USER_IMPORTS);
 
       const recordNumber = recordCount + 1;
@@ -257,7 +294,8 @@ async function main() {
               line,
               recordNumber,
               processMultiEmail,
-              emailVerifiedMode as EmailVerifiedMode
+              emailVerifiedMode as EmailVerifiedMode,
+              updateExistingPasswords,
             );
             if (successful) {
               completedCount++;
@@ -299,7 +337,7 @@ async function main() {
             const retryAfter = (error.retryAfter ?? DEFAULT_RETRY_AFTER) + 1;
             warningCount++;
             logger.logWarn(
-              `Rate limit exceeded. Pausing queue for ${retryAfter} seconds.`
+              `Rate limit exceeded. Pausing queue for ${retryAfter} seconds.`,
             );
 
             queue.pause();
@@ -333,7 +371,9 @@ async function main() {
       const sample = failedIds.slice(0, 5);
       if (sample.length > 0) {
         logger.logWarn(
-          `Failed Clerk user ids (first ${sample.length}): ${sample.join(", ")}`
+          `Failed Clerk user ids (first ${sample.length}): ${sample.join(
+            ", ",
+          )}`,
         );
       }
       if (errorsOutPath) {
@@ -361,7 +401,7 @@ async function main() {
                 escapeCsvField(f.email ?? ""),
                 escapeCsvField(f.errorMessage ?? ""),
                 escapeCsvField(f.timestamp),
-              ].join(",")
+              ].join(","),
             );
             fs.writeFileSync(errorsOutPath, [header, ...rows].join("\n"), {
               encoding: "utf8",

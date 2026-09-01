@@ -24,7 +24,7 @@ function splitList(value: unknown): string[] {
 function mergeEmails(
   primary: unknown,
   verified: unknown,
-  unverified: unknown
+  unverified: unknown,
 ): string {
   const emails: string[] = [];
   const seen = new Set<string>();
@@ -43,16 +43,19 @@ function mergeEmails(
   return emails.join("|");
 }
 
-export function mapCsvRowToUser(row: Record<string, unknown>): ClerkExportedUser {
+export function mapCsvRowToUser(
+  row: Record<string, unknown>,
+  includeUnverifiedEmails = false,
+): ClerkExportedUser {
   const email_addresses = mergeEmails(
     row.primary_email_address,
     row.verified_email_addresses,
-    row.unverified_email_addresses
+    includeUnverifiedEmails ? row.unverified_email_addresses : null,
   );
 
   const primary = toNull(row.primary_email_address)?.toLowerCase() ?? null;
   const verifiedSet = new Set(
-    splitList(row.verified_email_addresses).map((e) => e.toLowerCase())
+    splitList(row.verified_email_addresses).map((e) => e.toLowerCase()),
   );
   const primary_email_verified = primary ? verifiedSet.has(primary) : undefined;
 
@@ -73,8 +76,13 @@ export function mapCsvRowToUser(row: Record<string, unknown>): ClerkExportedUser
   };
 }
 
+export interface UserExportStreamOptions {
+  includeUnverifiedEmails?: boolean;
+}
+
 export async function* userExportStream(
-  filePath: string
+  filePath: string,
+  options: UserExportStreamOptions = {},
 ): AsyncIterable<unknown> {
   const ext = path.extname(filePath).toLowerCase();
 
@@ -87,12 +95,15 @@ export async function* userExportStream(
         trim: true,
         bom: true,
         relax_column_count: true,
-      })
+      }),
     );
 
     for await (const record of parser) {
       // Map Clerk CSV schema to expected JSON object
-      yield mapCsvRowToUser(record as Record<string, unknown>);
+      yield mapCsvRowToUser(
+        record as Record<string, unknown>,
+        options.includeUnverifiedEmails ?? false,
+      );
     }
     return;
   }

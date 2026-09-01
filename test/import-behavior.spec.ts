@@ -55,7 +55,7 @@ describe("mapCsvRowToUser", () => {
         unverified_email_addresses: "someone-else@corp.com",
         password_digest: BCRYPT_HASH,
         password_hasher: "bcrypt",
-      })
+      }),
     );
 
     expect(user.email_addresses).not.toContain("someone-else@corp.com");
@@ -67,7 +67,7 @@ describe("mapCsvRowToUser", () => {
         primary_email_address: "owner@corp.com",
         verified_email_addresses: "owner@corp.com|second@corp.com",
         unverified_email_addresses: "extra@corp.com",
-      })
+      }),
     );
 
     expect(user.email_addresses.split("|")).toEqual([
@@ -101,7 +101,49 @@ describe("findOrCreateUser", () => {
 
     expect(result).toEqual({ id: "user_existing" });
     expect(updateUser).not.toHaveBeenCalledWith(
-      expect.objectContaining({ passwordHash: expect.anything() })
+      expect.objectContaining({ passwordHash: expect.anything() }),
     );
+  });
+
+  it("updates an existing user's password when explicitly enabled", async () => {
+    createUser.mockRejectedValue(new Error("email_not_available"));
+    listUsers.mockResolvedValue({ data: [{ id: "user_existing" }] });
+    updateUser.mockResolvedValue({ id: "user_existing" });
+
+    await findOrCreateUser(exportedUser, false, "never", true);
+
+    expect(updateUser).toHaveBeenCalledWith({
+      userId: "user_existing",
+      passwordHash: BCRYPT_HASH,
+      passwordHashType: "bcrypt",
+    });
+  });
+
+  it("does not update an existing user's password when the export email is unverified, even when enabled", async () => {
+    createUser.mockRejectedValue(new Error("email_not_available"));
+    listUsers.mockResolvedValue({ data: [{ id: "user_existing" }] });
+
+    await findOrCreateUser(
+      { ...exportedUser, primary_email_verified: false },
+      false,
+      "never",
+      true,
+    );
+
+    expect(updateUser).not.toHaveBeenCalledWith(
+      expect.objectContaining({ passwordHash: expect.anything() }),
+    );
+  });
+
+  it("skips records that have no email address", async () => {
+    const result = await findOrCreateUser(
+      { ...exportedUser, email_addresses: "" },
+      false,
+      "never",
+    );
+
+    expect(result).toBe(false);
+    expect(createUser).not.toHaveBeenCalled();
+    expect(listUsers).not.toHaveBeenCalled();
   });
 });

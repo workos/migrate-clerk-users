@@ -42,10 +42,12 @@ This tool consumes either of the following:
 
 When a `.csv` file is provided, the tool will automatically map Clerk's columns to the expected fields and combine email addresses into the `email_addresses` field (pipe-separated, with the primary email first). No manual transformation is required.
 
+By default, only the primary and verified email addresses are used. Unverified email addresses are ignored because they are not proof of ownership; pass `--include-unverified-emails` to include them anyway.
+
 ### Passwords
 
 - If `password_digest` is provided with `password_hasher` set to `bcrypt`, the user will be created with that password.
-- If a matching user already exists, the importer will update the password hash.
+- If a matching user already exists, the importer leaves their password unchanged by default. Pass `--update-existing-passwords` to update the password hash for existing users. Only enable this if every record in the export is trusted, since it replaces the existing user's credentials. Even with the flag enabled, records whose primary email is known to be unverified are skipped.
 
 ### Email verification behavior
 
@@ -63,6 +65,8 @@ Note that the script will exit with an error if any custom password hashes are p
 
 - `--user-export <path>`: Path to Clerk export (JSON array or CSV).
 - `--process-multi-email` (default false): If multiple emails exist, use the first; otherwise skip that user.
+- `--include-unverified-emails` (default false): Include unverified email addresses from CSV exports when determining a user's email addresses.
+- `--update-existing-passwords` (default false): Update the password hash for users that already exist in WorkOS.
 - `--email-verified <never|always|from-csv>`: Controls whether to mark the primary email as verified.
 - `--quiet` (default false): Suppress non-error output.
 - `--errors-out <path>`: Write a detailed error report; CSV when `*.csv`, otherwise JSON.
