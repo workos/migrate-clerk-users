@@ -114,7 +114,7 @@ export function createLogger(opts: LoggerOptions = {}) {
       baseLines.push(c.bold("SUMMARY"));
       baseLines.push(`Status: ${statusColor(summary.status)}`);
       baseLines.push(
-        `Users imported: ${String(summary.imported)}/${String(summary.total)}`
+        `Users imported: ${String(summary.imported)}/${String(summary.total)}`,
       );
       baseLines.push(`Duration: ${summary.durationMs} ms`);
       baseLines.push(`Warnings: ${String(summary.warnings)}`);
@@ -125,11 +125,11 @@ export function createLogger(opts: LoggerOptions = {}) {
       const maxInnerWidth = Math.max(10, termCols - 2);
       const contentMax = baseLines.reduce(
         (m, line) => Math.max(m, visibleLen(line)),
-        0
+        0,
       );
       const innerWidth = Math.min(
         Math.max(minInnerWidth, contentMax + 2),
-        maxInnerWidth
+        maxInnerWidth,
       );
 
       const top = `┌${"─".repeat(innerWidth)}┐`;

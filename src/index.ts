@@ -42,6 +42,7 @@ export async function findOrCreateUser(
   processMultiEmail: boolean,
   emailVerifiedMode: EmailVerifiedMode,
   updateExistingPasswords = false,
+  warn: (message: string) => void = console.warn,
 ) {
   // Clerk formats multiple email addresses by separating them with a pipe character
   // We unfortunately have no way of knowing which email is the primary one, so we only use the first email
@@ -104,14 +105,14 @@ export async function findOrCreateUser(
     if (matchingUsers.data.length === 1) {
       const existingUser = matchingUsers.data[0];
       if (exportedUser.password_digest && !updateExistingPasswords) {
-        console.warn(
+        warn(
           `Found existing user for ${exportedUser.id}; not updating their password. Pass --update-existing-passwords to update passwords for existing users.`,
         );
       } else if (
         exportedUser.password_digest &&
         exportedUser.primary_email_verified === false
       ) {
-        console.warn(
+        warn(
           `Email for ${exportedUser.id} is not verified in the export; not updating the password for existing user ${existingUser.id}.`,
         );
       } else if (exportedUser.password_digest) {
@@ -159,6 +160,7 @@ async function processLine(
   processMultiEmail: boolean,
   emailVerifiedMode: EmailVerifiedMode,
   updateExistingPasswords: boolean,
+  warn: (message: string) => void,
 ): Promise<boolean> {
   const exportedUser = ClerkExportedUser.parse(line);
 
@@ -167,6 +169,7 @@ async function processLine(
     processMultiEmail,
     emailVerifiedMode,
     updateExistingPasswords,
+    warn,
   );
   if (!workOsUser) {
     console.error(
@@ -296,6 +299,10 @@ async function main() {
               processMultiEmail,
               emailVerifiedMode as EmailVerifiedMode,
               updateExistingPasswords,
+              (message) => {
+                warningCount++;
+                logger.logWarn(message);
+              },
             );
             if (successful) {
               completedCount++;
